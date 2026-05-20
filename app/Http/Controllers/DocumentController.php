@@ -176,4 +176,14 @@ class DocumentController extends Controller
         if ($old === $new) return 'no changes';
         return 'content changed';
     }
-}
+
+     public function destroy($id)
+{
+    $document = document::findOrFail($id);
+    $document->participants()->delete();
+    $document->revisions()->delete();
+    $document->delete();
+    
+    return redirect('/dashboard')->with('success', 'Document deleted');   
+} 
+} 

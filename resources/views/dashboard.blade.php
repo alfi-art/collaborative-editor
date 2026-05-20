@@ -7,35 +7,41 @@
             <div class="p-6">
                 <div class="flex justify-between items-center mb-6">
                     <h1 class="text-2xl font-bold">My Documents</h1>
-                    <form action="/documents" method="POST">
+                    <form action="/documents" method="POST" class="flex gap-2">
                         @csrf
-                        <input type="text" name="title" placeholder="Document title" class="border rounded px-3 py-1 mr-2" required>
-                        <button type="submit" class="bg-blue-500 text-white px-4 py-1 rounded">+ New Document</button>
+                        <input type="text" name="title" placeholder="Document title" class="border rounded px-3 py-2" required>
+                        <button type="submit" class="bg-blue-500 text-white px-4 py-2 rounded">+ New</button>
                     </form>
                 </div>
                 
                 @if($documents->isEmpty())
-                    <p class="text-gray-500 text-center py-8">No documents yet. Create your first document!</p>
+                    <p class="text-gray-500">No documents yet.</p>
                 @else
                     @foreach($documents as $doc)
-                        <div class="border p-4 mb-3 rounded-lg hover:shadow transition">
-                            <div class="flex justify-between items-center">
-                                <div>
-                                    <h3 class="font-bold text-lg">{{ $doc->title }}</h3>
-                                    <div class="text-sm text-gray-500 mt-1">
-                                        <span>Version {{ $doc->current_version }}</span>
-                                        <span class="mx-2">•</span>
-                                        <span>Created by {{ $doc->owner->name ?? 'Unknown' }}</span>
-                                        <span class="mx-2">•</span>
-                                        <span>{{ $doc->created_at->diffForHumans() }}</span>
-                                    </div>
-                                </div>
-                                <a href="/documents/{{ $doc->id }}/edit" 
-                                   class="bg-blue-500 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-600 transition">
-                                    Open Document →
-                                </a>
-                            </div>
+                    <div style="border:1px solid #ddd; padding:12px; margin-bottom:10px; border-radius:8px; display:flex; justify-content:space-between; align-items:center;">
+                        <div>
+                            <strong style="font-size:16px;">{{ $doc->title }}</strong>
+                            <span style="color:gray; margin-left:8px;">v{{ $doc->current_version }}</span>
+                            <span style="color:gray; margin-left:8px;">by {{ $doc->owner->name ?? 'Unknown' }}</span>
                         </div>
+                        <div>
+                            <a href="/documents/{{ $doc->id }}/edit" 
+                               style="background-color: #22c55e; color:white; padding:6px 12px; border-radius:6px; text-decoration:none; margin-right:8px;">
+                                OPEN
+                            </a>
+                            <form action="/documents/{{ $doc->id }}" 
+                                  method="POST" 
+                                  onsubmit="return confirm('Delete {{ $doc->title }}?')"
+                                  style="display: inline;">
+                                @csrf
+                                @method('DELETE')
+                                <button type="submit" 
+                                        style="background-color: #ef4444; color:white; padding:6px 12px; border-radius:6px; border:none; cursor:pointer;">
+                                    DELETE
+                                </button>
+                            </form>
+                        </div>
+                    </div>
                     @endforeach
                 @endif
             </div>
