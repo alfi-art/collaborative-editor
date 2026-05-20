@@ -5,26 +5,26 @@ namespace App\Http\Controllers;
 use App\Models\document;
 use App\Models\DocumentParticipant;
 use App\Models\DocumentRevision;
+use App\Events\DocumentUpdate;
+use App\Events\CursorMoved;
+use App\Events\UserJoined;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 
 class DocumentController extends Controller
 {
-    // API: Menampilkan daftar dokumen
     public function index()
     {
         $documents = document::where('owner_id', Auth::id())->get();
         return response()->json($documents);
     }
     
-    // API: Menampilkan satu dokumen
     public function show($id)
     {
         $document = document::findOrFail($id);
         return response()->json($document);
     }
     
-    // Web: Membuat dokumen baru
     public function store(Request $request)
     {
         $request->validate([
@@ -38,7 +38,6 @@ class DocumentController extends Controller
             'current_version' => 1,
         ]);
         
-        // Tambah owner sebagai participant
         DocumentParticipant::create([
             'document_id' => $document->id,
             'user_id' => Auth::id(),
@@ -46,7 +45,6 @@ class DocumentController extends Controller
             'cursor_color' => '#' . substr(md5(Auth::id()), 0, 6),
         ]);
         
-        // Simpan revisi pertama
         DocumentRevision::create([
             'document_id' => $document->id,
             'user_id' => Auth::id(),
@@ -58,12 +56,10 @@ class DocumentController extends Controller
         return redirect("/documents/{$document->id}/edit");
     }
     
-    // Web: Halaman editor
     public function edit($id)
     {
         $document = document::findOrFail($id);
         
-        // Tambah atau update participant
         $participant = DocumentParticipant::firstOrCreate(
             ['document_id' => $id, 'user_id' => Auth::id()],
             ['cursor_color' => '#' . substr(md5(Auth::id()), 0, 6)]
@@ -71,7 +67,13 @@ class DocumentController extends Controller
         
         $participant->update(['last_active_at' => now()]);
         
-        // Ambil semua participant aktif (5 menit terakhir)
+        // Broadcast user joined (tanpa mengganggu real-time)
+        try {
+            broadcast(new UserJoined($id, Auth::user(), $participant->cursor_color));
+        } catch(\Exception $e) {
+            // Abaikan error broadcast
+        }
+        
         $activeParticipants = DocumentParticipant::where('document_id', $id)
             ->with('user')
             ->where('last_active_at', '>=', now()->subMinutes(5))
@@ -86,31 +88,32 @@ class DocumentController extends Controller
         ]);
     }
     
-    // Web & API: Update konten dokumen
     public function update(Request $request, $id)
     {
         $document = document::findOrFail($id);
-        $oldContent = $document->content;
         $document->content = $request->content;
         $document->current_version++;
         $document->save();
         
-        // Simpan revisi
         DocumentRevision::create([
             'document_id' => $id,
             'user_id' => Auth::id(),
             'content' => $request->content,
             'version_number' => $document->current_version,
-            'metadata' => json_encode([
-                'user' => Auth::user()->name,
-                'diff' => $this->getDiff($oldContent, $request->content)
-            ]),
+            'metadata' => json_encode(['user' => Auth::user()->name]),
         ]);
+        
+        // BROADCAST REAL-TIME (IN YANG PENTING)
+        broadcast(new DocumentUpdate(
+            $id, 
+            $request->content, 
+            Auth::id(), 
+            Auth::user()->name
+        ));
         
         return response()->json(['success' => true, 'version' => $document->current_version]);
     }
     
-    // Web: Ambil history revisi
     public function getRevisions($id)
     {
         $revisions = DocumentRevision::where('document_id', $id)
@@ -120,7 +123,6 @@ class DocumentController extends Controller
         return response()->json($revisions);
     }
     
-    // Web: Rollback ke versi tertentu
     public function rollback($id, $revisionId)
     {
         $document = document::findOrFail($id);
@@ -130,7 +132,6 @@ class DocumentController extends Controller
         $document->current_version++;
         $document->save();
         
-        // Simpan rollback sebagai revisi baru
         DocumentRevision::create([
             'document_id' => $id,
             'user_id' => Auth::id(),
@@ -143,7 +144,31 @@ class DocumentController extends Controller
             ]),
         ]);
         
+        broadcast(new DocumentUpdate(
+            $id, 
+            $revision->content, 
+            Auth::id(), 
+            Auth::user()->name
+        ));
+        
         return redirect("/documents/{$id}/edit")->with('success', 'Rollback successful!');
+    }
+    
+    public function broadcastCursor(Request $request, $id)
+    {
+        try {
+            broadcast(new CursorMoved(
+                $id,
+                auth()->id(),
+                auth()->user()->name,
+                $request->position,
+                $request->color
+            ));
+        } catch(\Exception $e) {
+            // Abaikan error
+        }
+        
+        return response()->json(['success' => true]);
     }
     
     private function getDiff($old, $new)

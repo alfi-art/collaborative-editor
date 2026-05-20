@@ -5,20 +5,16 @@ namespace App\Events;
 use Illuminate\Broadcasting\Channel;
 use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
 
-class CursorMoved implements ShouldBroadcastNow
+class UserJoined implements ShouldBroadcastNow
 {
     public $documentId;
-    public $userId;
-    public $userName;
-    public $position;
+    public $user;
     public $color;
 
-    public function __construct($documentId, $userId, $userName, $position, $color)
+    public function __construct($documentId, $user, $color)
     {
         $this->documentId = $documentId;
-        $this->userId = $userId;
-        $this->userName = $userName;
-        $this->position = $position;
+        $this->user = $user;
         $this->color = $color;
     }
 

@@ -6,12 +6,16 @@
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>{{ $document->title }} - Collaborative Editor</title>
     
-    <!-- Quill Editor CSS & JS -->
+    <!-- Quill Editor -->
     <link href="https://cdn.quilljs.com/1.3.6/quill.snow.css" rel="stylesheet">
     <script src="https://cdn.quilljs.com/1.3.6/quill.js"></script>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- WebSocket -->
+    <script src="https://cdn.jsdelivr.net/npm/laravel-echo@1.15.0/dist/echo.iife.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/pusher-js@7.0.3/dist/web/pusher.min.js"></script>
     
     <style>
         #editor-container {
@@ -32,54 +36,78 @@
             transition: opacity 0.3s;
             z-index: 100;
         }
-        .version-history {
+        .remote-cursor {
+            position: absolute;
+            width: 2px;
+            height: 20px;
+            background: currentColor;
+            pointer-events: none;
+            z-index: 1000;
+        }
+        .remote-cursor-label {
+            position: absolute;
+            top: -18px;
+            left: 0;
+            background: currentColor;
+            color: white;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 11px;
+            white-space: nowrap;
+        }
+        .participants-panel {
             position: fixed;
             right: 20px;
             top: 100px;
-            width: 260px;
+            width: 200px;
             background: white;
             border-radius: 8px;
             padding: 12px;
             box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-            max-height: 70vh;
-            overflow-y: auto;
-            display: none;
         }
-        .version-history.show {
+        .participant-item {
+            display: flex;
+            align-items: center;
+            padding: 4px 0;
+            font-size: 13px;
+        }
+        .participant-color {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        #version-panel {
+            position: fixed;
+            right: 20px;
+            top: 100px;
+            width: 300px;
+            background: white;
+            border-radius: 8px;
+            padding: 12px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            display: none;
+            z-index: 200;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+        #version-panel.show {
             display: block;
         }
         .version-item {
-            padding: 8px;
             border-bottom: 1px solid #eee;
+            padding: 8px 0;
+        }
+        .btn-restore {
+            background: #eab308;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 11px;
             cursor: pointer;
         }
-        .version-item:hover {
-            background: #f5f5f5;
-        }
-        .ql-editor {
-            font-size: 16px;
-            line-height: 1.6;
-        }
-        .btn {
-            padding: 8px 16px;
-            border-radius: 6px;
-            font-size: 14px;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-        .btn-primary {
-            background: #3B82F6;
-            color: white;
-        }
-        .btn-primary:hover {
-            background: #2563EB;
-        }
-        .btn-secondary {
-            background: #6B7280;
-            color: white;
-        }
-        .btn-secondary:hover {
-            background: #4B5563;
+        .btn-restore:hover {
+            background: #ca8a04;
         }
     </style>
 </head>
@@ -96,10 +124,10 @@
                     </p>
                 </div>
                 <div class="space-x-3">
-                    <button onclick="toggleHistory()" class="btn btn-secondary">
+                    <button onclick="toggleHistory()" class="bg-gray-500 text-white px-4 py-2 rounded-lg hover:bg-gray-600 transition">
                         📜 Version History
                     </button>
-                    <a href="/dashboard" class="btn btn-primary">
+                    <a href="/dashboard" class="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 transition">
                         ← Back to Dashboard
                     </a>
                 </div>
@@ -107,191 +135,188 @@
         </div>
     </div>
     
-    <!-- Editor Container -->
+    <!-- Editor -->
     <div class="container mx-auto px-6 py-6">
         <div id="editor-container"></div>
     </div>
     
-    <!-- Saving Status -->
-    <div id="saving-status" class="saving-status opacity-0">
-        💾 Saving...
+    <!-- Active Users Panel -->
+    <div class="participants-panel">
+        <h3 class="font-bold mb-2 text-sm">👥 Active Users</h3>
+        <div id="participants-list">
+            <div class="participant-item" id="participant-{{ $userId }}">
+                <div class="participant-color" style="background: {{ $userColor }}"></div>
+                <span>{{ $userName }} (You)</span>
+            </div>
+            @foreach($activeParticipants as $participant)
+                @if($participant->user_id != $userId)
+                <div class="participant-item" id="participant-{{ $participant->user_id }}">
+                    <div class="participant-color" style="background: {{ $participant->cursor_color }}"></div>
+                    <span>{{ $participant->user->name }}</span>
+                </div>
+                @endif
+            @endforeach
+        </div>
     </div>
     
     <!-- Version History Panel -->
-    <div id="version-panel" class="version-history">
+    <div id="version-panel">
         <div class="flex justify-between items-center mb-4">
-            <h3 class="font-bold text-lg">Version History</h3>
-            <button onclick="toggleHistory()" class="text-gray-500 hover:text-gray-700">✕</button>
+            <h3 class="font-bold">📜 Version History</h3>
+            <button onclick="toggleHistory()" class="text-gray-500 hover:text-gray-700">&times;</button>
         </div>
-        <div id="history-list">
-            <p class="text-gray-500 text-sm">Loading...</p>
-        </div>
+        <div id="history-list">Loading...</div>
     </div>
     
+    <!-- Saving Status -->
+    <div id="saving-status" class="saving-status opacity-0">💾 Saving...</div>
+    
     <script>
-        // Data dari server
         const documentId = {{ $document->id }};
         const userId = {{ $userId }};
         const userName = '{{ $userName }}';
         const userColor = '{{ $userColor }}';
         
-        // Variabel global
-        let quill;
-        let saveTimeout;
-        let currentContent;
+        let quill, saveTimeout, currentContent, isLocalChange = false;
         
-        // Load initial content
+        // Load content
         let initialContent = @json($document->content);
-        try {
-            initialContent = JSON.parse(initialContent);
-        } catch(e) {
-            initialContent = { ops: [{ insert: "\n" }] };
-        }
+        try { initialContent = JSON.parse(initialContent); } catch(e) { initialContent = { ops: [{ insert: "\n" }] }; }
         
-        // Initialize Quill Editor
-        quill = new Quill('#editor-container', {
-            theme: 'snow',
-            placeholder: 'Start typing here...',
-            modules: {
-                toolbar: [
-                    [{ 'header': [1, 2, 3, false] }],
-                    ['bold', 'italic', 'underline', 'strike'],
-                    [{ 'list': 'ordered'}, { 'list': 'bullet' }],
-                    ['link', 'clean']
-                ]
-            }
-        });
-        
-        // Set content
+        // Init Quill
+        quill = new Quill('#editor-container', { theme: 'snow', modules: { toolbar: true } });
         quill.setContents(initialContent);
         currentContent = initialContent;
         
-        // Auto-save on text change
+        // Auto-save
         quill.on('text-change', function(delta, oldDelta, source) {
             if (source === 'user') {
+                isLocalChange = true;
                 clearTimeout(saveTimeout);
                 saveTimeout = setTimeout(saveContent, 500);
-                
-                // Show saving indicator
-                const status = document.getElementById('saving-status');
-                status.classList.remove('opacity-0');
-                setTimeout(() => status.classList.add('opacity-0'), 1000);
+                document.getElementById('saving-status').classList.remove('opacity-0');
+                setTimeout(() => document.getElementById('saving-status').classList.add('opacity-0'), 1000);
             }
         });
         
-        // Save content to server
         async function saveContent() {
             const content = JSON.stringify(quill.getContents());
-            
-            try {
-                const response = await fetch(`/documents/${documentId}`, {
-                    method: 'PUT',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
-                    },
-                    body: JSON.stringify({ content: content })
-                });
-                
-                if (response.ok) {
-                    currentContent = content;
-                }
-            } catch (error) {
-                console.error('Save error:', error);
-            }
+            await fetch(`/documents/${documentId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content },
+                body: JSON.stringify({ content: content })
+            });
         }
         
-        // Toggle version history panel
+        // WebSocket
+        window.Pusher = Pusher;
+        window.Echo = new Echo({
+            broadcaster: 'reverb',
+            key: '{{ env("REVERB_APP_KEY") }}',
+            wsHost: '{{ env("REVERB_HOST", "localhost") }}',
+            wsPort: {{ env("REVERB_PORT", 8080) }},
+            forceTLS: false,
+            enabledTransports: ['ws']
+        });
+        
+        // Real-time update
+        window.Echo.channel(`document.${documentId}`)
+            .listen('DocumentUpdate', (e) => {
+                if (e.userId !== userId) {
+                    isLocalChange = true;
+                    try { quill.setContents(JSON.parse(e.content)); } catch(err) {}
+                    setTimeout(() => { isLocalChange = false; }, 100);
+                }
+            });
+        
+        // Live cursor
+        quill.on('selection-change', function(range) {
+            if (range) {
+                fetch(`/documents/${documentId}/cursor`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content },
+                    body: JSON.stringify({ position: { index: range.index }, color: userColor })
+                });
+            }
+        });
+        
+        window.Echo.channel(`document.${documentId}`)
+            .listen('CursorMoved', (e) => {
+                if (e.userId !== userId) {
+                    const old = document.getElementById(`cursor-${e.userId}`);
+                    if (old) old.remove();
+                    
+                    const cursor = document.createElement('div');
+                    cursor.id = `cursor-${e.userId}`;
+                    cursor.className = 'remote-cursor';
+                    cursor.style.color = e.color;
+                    const label = document.createElement('div');
+                    label.className = 'remote-cursor-label';
+                    label.innerText = e.userName;
+                    label.style.backgroundColor = e.color;
+                    cursor.appendChild(label);
+                    cursor.style.top = '20px';
+                    cursor.style.left = `${e.position.index * 8}px`;
+                    document.querySelector('.ql-editor')?.appendChild(cursor);
+                }
+            });
+        
+        // User joined
+        window.Echo.channel(`document.${documentId}`)
+            .listen('UserJoined', (e) => {
+                if (e.user.id !== userId) {
+                    const container = document.getElementById('participants-list');
+                    if (!document.getElementById(`participant-${e.user.id}`)) {
+                        const div = document.createElement('div');
+                        div.id = `participant-${e.user.id}`;
+                        div.className = 'participant-item';
+                        div.innerHTML = `<div class="participant-color" style="background: ${e.color}"></div><span>${e.user.name}</span>`;
+                        container.appendChild(div);
+                    }
+                }
+            });
+        
+        // Version History functions
         function toggleHistory() {
             const panel = document.getElementById('version-panel');
             panel.classList.toggle('show');
-            if (panel.classList.contains('show')) {
-                loadHistory();
-            }
+            if (panel.classList.contains('show')) loadHistory();
         }
         
-        // Load version history
         async function loadHistory() {
-            try {
-                const response = await fetch(`/documents/${documentId}/revisions`);
-                const revisions = await response.json();
-                
-                const container = document.getElementById('history-list');
-                if (revisions.length === 0) {
-                    container.innerHTML = '<p class="text-gray-500 text-sm">No revisions yet.</p>';
-                    return;
-                }
-                
-                let html = '';
-                for (let rev of revisions) {
-                    let metadata = '';
-                    if (rev.metadata) {
-                        if (typeof rev.metadata === 'string') {
-                            try {
-                                metadata = JSON.parse(rev.metadata);
-                            } catch(e) {}
-                        } else {
-                            metadata = rev.metadata;
-                        }
-                    }
-                    
-                    html += `
-                        <div class="version-item">
-                            <div class="flex justify-between items-start">
-                                <div>
-                                    <span class="font-bold text-sm">v${rev.version_number}</span>
-                                    <div class="text-xs text-gray-500">by ${rev.user?.name || 'Unknown'}</div>
-                                    <div class="text-xs text-gray-400">${new Date(rev.created_at).toLocaleString()}</div>
-                                    ${metadata.user ? `<div class="text-xs text-gray-500 mt-1">✏️ ${metadata.user}</div>` : ''}
-                                </div>
-                                <button onclick="rollbackToVersion(${rev.id})" 
-                                        class="text-xs bg-yellow-500 text-white px-2 py-1 rounded hover:bg-yellow-600">
-                                    Restore
-                                </button>
-                            </div>
-                        </div>
-                    `;
-                }
-                container.innerHTML = html;
-                
-            } catch (error) {
-                console.error('Error loading history:', error);
-                document.getElementById('history-list').innerHTML = '<p class="text-red-500 text-sm">Failed to load history</p>';
-            }
-        }
-        
-        // Rollback to specific version
-        async function rollbackToVersion(revisionId) {
-            if (!confirm('Restore to this version? Current changes will be saved as a new revision.')) return;
+            const res = await fetch(`/documents/${documentId}/revisions`);
+            const revisions = await res.json();
+            const container = document.getElementById('history-list');
+            if (revisions.length === 0) { container.innerHTML = '<p class="text-gray-500">No revisions</p>'; return; }
             
-            try {
-                const response = await fetch(`/documents/${documentId}/rollback/${revisionId}`, {
-                    method: 'POST',
-                    headers: {
-                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
-                    }
-                });
-                
-                if (response.ok) {
-                    alert('Rollback successful! Page will reload.');
-                    location.reload();
-                } else {
-                    alert('Failed to rollback');
-                }
-            } catch (error) {
-                console.error('Rollback error:', error);
-                alert('Failed to rollback');
+            let html = '';
+            for (let rev of revisions) {
+                html += `
+                    <div class="version-item">
+                        <div class="flex justify-between items-start">
+                            <div>
+                                <span class="font-bold">v${rev.version_number}</span>
+                                <div class="text-xs text-gray-500">${rev.user?.name || 'Unknown'}</div>
+                                <div class="text-xs text-gray-400">${new Date(rev.created_at).toLocaleString()}</div>
+                            </div>
+                            <button onclick="rollback(${rev.id})" class="btn-restore">Restore</button>
+                        </div>
+                    </div>
+                `;
             }
+            container.innerHTML = html;
         }
         
-        // Auto-save before leaving page
-        window.addEventListener('beforeunload', function() {
-            if (JSON.stringify(quill.getContents()) !== JSON.stringify(currentContent)) {
-                saveContent();
-            }
-        });
+        async function rollback(revisionId) {
+            if (!confirm('Restore to this version?')) return;
+            await fetch(`/documents/${documentId}/rollback/${revisionId}`, {
+                method: 'POST',
+                headers: { 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content }
+            });
+            location.reload();
+        }
         
-        console.log('Editor ready! Document ID: ' + documentId);
+        console.log('Editor ready!');
     </script>
 </body>
 </html>

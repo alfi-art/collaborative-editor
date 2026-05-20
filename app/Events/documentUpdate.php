@@ -11,7 +11,7 @@ class DocumentUpdate implements ShouldBroadcastNow
     public $content;
     public $userId;
     public $userName;
-    
+
     public function __construct($documentId, $content, $userId, $userName)
     {
         $this->documentId = $documentId;
@@ -19,7 +19,7 @@ class DocumentUpdate implements ShouldBroadcastNow
         $this->userId = $userId;
         $this->userName = $userName;
     }
-    
+
     public function broadcastOn()
     {
         return new Channel('document.' . $this->documentId);

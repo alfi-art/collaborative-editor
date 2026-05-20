@@ -19,6 +19,7 @@ Route::middleware(['auth'])->group(function () {
     Route::put('/documents/{id}', [DocumentController::class, 'update']);
     Route::get('/documents/{id}/revisions', [DocumentController::class, 'getRevisions']);
     Route::post('/documents/{id}/rollback/{revisionId}', [DocumentController::class, 'rollback']);
+    Route::post('/documents/{id}/cursor', [DocumentController::class, 'broadcastCursor']);
 });
 
 require __DIR__.'/auth.php';
